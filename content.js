@@ -124,8 +124,8 @@
 
   // ==========================================================================
   // fillPrompt — กรอก text ลงใน Slate editor
-  // ใช้ ClipboardEvent paste เพราะ Slate ฟัง paste event โดยตรง
-  // fallback เป็น execCommand('insertText') ถ้า paste ไม่ทำงาน
+  // ใช้ Clipboard API เขียนลง clipboard จริง แล้วจำลอง Ctrl+V + paste event
+  // fallback เป็น execCommand('insertText') ถ้ายังไม่ detect
   // ==========================================================================
   async function fillPrompt(text) {
     const editor = await findPromptBox();
@@ -135,32 +135,57 @@
 
     // step 1: focus ที่ editor
     editor.focus();
-    await sleep(300);
+    await sleep(500);
 
-    // step 2: select all แล้วลบเนื้อหาเดิม
-    editor.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "a", code: "KeyA", ctrlKey: true, bubbles: true
-    }));
-    await sleep(100);
-    document.execCommand("delete");
+    // step 2: Select all + delete เคลียร์เนื้อหาเดิม
+    const selectAll = new KeyboardEvent("keydown", {
+      key: "a", code: "KeyA", ctrlKey: true,
+      bubbles: true, cancelable: true
+    });
+    editor.dispatchEvent(selectAll);
     await sleep(200);
 
-    // step 3: จำลอง paste event — Slate รับ ClipboardEvent ได้โดยตรง
-    const dataTransfer = new DataTransfer();
-    dataTransfer.setData("text/plain", text);
+    const backspace = new KeyboardEvent("keydown", {
+      key: "Backspace", code: "Backspace",
+      bubbles: true, cancelable: true
+    });
+    editor.dispatchEvent(backspace);
+    await sleep(300);
+
+    // step 3: เขียนลง clipboard จริงผ่าน Clipboard API
+    try {
+      await navigator.clipboard.writeText(text);
+      await sleep(200);
+    } catch (err) {
+      sendLog(`เขียน clipboard ล้มเหลว: ${err.message}`, "warning");
+    }
+
+    // step 4: จำลอง Ctrl+V keydown
+    const pasteKeydown = new KeyboardEvent("keydown", {
+      key: "v", code: "KeyV", ctrlKey: true,
+      bubbles: true, cancelable: true
+    });
+    editor.dispatchEvent(pasteKeydown);
+    await sleep(200);
+
+    // step 5: ส่ง ClipboardEvent paste พร้อม data
+    const dt = new DataTransfer();
+    dt.setData("text/plain", text);
     const pasteEvent = new ClipboardEvent("paste", {
       bubbles: true,
       cancelable: true,
-      clipboardData: dataTransfer
+      clipboardData: dt
     });
     editor.dispatchEvent(pasteEvent);
     await sleep(500);
 
-    // step 4: fallback — ถ้า paste ไม่ทำงาน (editor ยังว่าง) ลอง insertText
-    if (!editor.textContent || editor.textContent.trim().length === 0) {
-      sendLog("paste ไม่ทำงาน — ลอง insertText แทน", "warning");
+    // step 6: fallback — ถ้ายังไม่มีข้อความ ลอง execCommand
+    if (!editor.textContent || editor.textContent.trim().length < 10) {
+      sendLog("paste ไม่ทำงาน — ลอง execCommand fallback", "warning");
+      editor.focus();
+      document.execCommand("selectAll", false, null);
+      document.execCommand("delete", false, null);
       document.execCommand("insertText", false, text);
-      editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
       await sleep(300);
     }
 
