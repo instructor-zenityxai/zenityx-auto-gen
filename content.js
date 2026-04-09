@@ -91,27 +91,34 @@
 
   // ==========================================================================
   // findPromptBox — หา Slate editor ของ Google Flow
-  // selector หลัก: [data-slate-editor="true"][contenteditable="true"]
+  // ใช้ polling รอจนกว่า DOM จะโหลดเสร็จ (สูงสุด 30 วินาที)
   // ==========================================================================
-  function findPromptBox() {
-    // selector เรียงจากเจาะจงไปกว้าง
-    const selectors = [
-      '[data-slate-editor="true"][contenteditable="true"]',
-      '[data-slate-editor="true"]',
-      '[contenteditable="true"][role="textbox"]',
-      'div[contenteditable="true"]'
-    ];
+  async function findPromptBox(maxWait = 30000) {
+    const interval = 500;
+    let elapsed = 0;
+    while (elapsed < maxWait) {
+      // ลอง selector หลักก่อน แล้ว fallback ไปตัวกว้างขึ้น
+      const selectors = [
+        '[data-slate-editor="true"][contenteditable="true"]',
+        '[data-slate-editor="true"]',
+        '[contenteditable="true"][role="textbox"]',
+        'div[contenteditable="true"]'
+      ];
 
-    for (const selector of selectors) {
-      const elements = document.querySelectorAll(selector);
-      // หา element ที่ visible จริง และมีขนาดพอสมควร
-      for (const el of elements) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 100 && rect.height > 20 && isVisible(el)) {
-          return el;
+      for (const selector of selectors) {
+        const elements = document.querySelectorAll(selector);
+        for (const el of elements) {
+          if (isVisible(el)) {
+            return el;
+          }
         }
       }
+
+      // ยังไม่เจอ — รอแล้วลองใหม่
+      await new Promise((r) => setTimeout(r, interval));
+      elapsed += interval;
     }
+    // หมดเวลา — return null ให้ caller จัดการ error
     return null;
   }
 
@@ -121,9 +128,9 @@
   // ต้องใช้ document.execCommand + dispatch InputEvent
   // ==========================================================================
   async function fillPrompt(text) {
-    const box = findPromptBox();
+    const box = await findPromptBox();
     if (!box) {
-      throw new Error("ไม่พบช่อง prompt (Slate editor) บนหน้า Google Flow");
+      throw new Error("ไม่พบช่อง prompt (Slate editor) บนหน้า Google Flow — รอ 30 วินาทีแล้วยังไม่เจอ");
     }
 
     // step 1: focus ที่ editor
@@ -181,8 +188,8 @@
   // findGenerateButton — หาปุ่ม Generate ของ Google Flow
   // class เป็น dynamic (sc-xxx) จึงต้องใช้วิธี relative หลายแบบ
   // ==========================================================================
-  function findGenerateButton() {
-    const promptBox = findPromptBox();
+  async function findGenerateButton() {
+    const promptBox = await findPromptBox();
     if (!promptBox) return null;
 
     // strategy 1: ไล่ขึ้นไปหา container แม่ แล้วหาปุ่มตัวสุดท้ายใน container
@@ -266,7 +273,7 @@
   // clickGenerate — คลิกปุ่ม Generate
   // ==========================================================================
   async function clickGenerate() {
-    const btn = findGenerateButton();
+    const btn = await findGenerateButton();
     if (!btn) {
       throw new Error("ไม่พบปุ่ม Generate บนหน้า");
     }
