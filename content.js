@@ -124,64 +124,225 @@
 
   // ==========================================================================
   // fillPrompt — กรอก text ลงใน Slate editor
-  // Slate ไม่ detect การเปลี่ยน textContent/value ตรง ๆ
-  // ต้องใช้ document.execCommand + dispatch InputEvent
+  // ใช้ ClipboardEvent paste เพราะ Slate ฟัง paste event โดยตรง
+  // fallback เป็น execCommand('insertText') ถ้า paste ไม่ทำงาน
   // ==========================================================================
   async function fillPrompt(text) {
-    const box = await findPromptBox();
-    if (!box) {
+    const editor = await findPromptBox();
+    if (!editor) {
       throw new Error("ไม่พบช่อง prompt (Slate editor) บนหน้า Google Flow — รอ 30 วินาทีแล้วยังไม่เจอ");
     }
 
     // step 1: focus ที่ editor
-    box.focus();
-    await sleep(150);
+    editor.focus();
+    await sleep(300);
 
-    // step 2: เลือกเนื้อหาทั้งหมดแล้วลบทิ้ง (เคลียร์ prompt เก่า)
-    try {
-      // สร้าง range ครอบคลุมเนื้อหาทั้งหมดใน editor
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(box);
-      selection.removeAllRanges();
-      selection.addRange(range);
+    // step 2: select all แล้วลบเนื้อหาเดิม
+    editor.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "a", code: "KeyA", ctrlKey: true, bubbles: true
+    }));
+    await sleep(100);
+    document.execCommand("delete");
+    await sleep(200);
 
-      // ลบด้วย execCommand — Slate จะ detect ผ่าน beforeinput/input event
-      document.execCommand("selectAll", false, null);
-      await sleep(50);
-      document.execCommand("delete", false, null);
-      await sleep(50);
-    } catch (err) {
-      sendLog(`เคลียร์ prompt เก่าล้มเหลว: ${err.message}`, "warning");
+    // step 3: จำลอง paste event — Slate รับ ClipboardEvent ได้โดยตรง
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", text);
+    const pasteEvent = new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dataTransfer
+    });
+    editor.dispatchEvent(pasteEvent);
+    await sleep(500);
+
+    // step 4: fallback — ถ้า paste ไม่ทำงาน (editor ยังว่าง) ลอง insertText
+    if (!editor.textContent || editor.textContent.trim().length === 0) {
+      sendLog("paste ไม่ทำงาน — ลอง insertText แทน", "warning");
+      document.execCommand("insertText", false, text);
+      editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      await sleep(300);
     }
 
-    // step 3: insert text ใหม่ผ่าน execCommand
-    // execCommand('insertText') จะยิง beforeinput event ที่ Slate ฟังอยู่
-    const inserted = document.execCommand("insertText", false, text);
-    if (!inserted) {
-      // fallback สุดท้าย: dispatch beforeinput event ด้วยตัวเอง
-      sendLog("execCommand insertText ล้มเหลว — ลอง beforeinput แทน", "warning");
-      const beforeInput = new InputEvent("beforeinput", {
-        bubbles: true,
-        cancelable: true,
-        inputType: "insertText",
-        data: text
-      });
-      box.dispatchEvent(beforeInput);
+    sendLog(`กรอก prompt สำเร็จ (${text.length} ตัวอักษร)`, "info");
+  }
+
+  // ==========================================================================
+  // uploadProductImage — อัพโหลดรูปสินค้าก่อน generate
+  // Google Flow บังคับให้อัพโหลดรูปก่อน generate ได้
+  //
+  // Flow จริง:
+  // 1. กดปุ่ม "+" (aria-haspopup="dialog") ข้าง Slate editor
+  // 2. รอ popup เปิด → กดปุ่ม "อัพโหลดรูปภาพ"
+  // 3. หา input[type="file"] ที่ซ่อนอยู่ → ใส่ File object
+  // 4. dispatch change event → รอรูปโหลด
+  // ==========================================================================
+  async function uploadProductImage() {
+    // ดึง base64 จาก storage — ถ้าไม่มีรูปให้ข้ามไป
+    const data = await chrome.storage.local.get("productImageBase64");
+    const base64 = data.productImageBase64;
+    if (!base64) {
+      sendLog("ไม่มีรูปสินค้าใน storage — ข้ามขั้นตอนอัพโหลด", "info");
+      return false;
     }
 
-    // step 4: dispatch input event เพื่อให้แน่ใจว่า Slate update state
-    box.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        cancelable: false,
-        inputType: "insertText",
-        data: text
-      })
+    sendLog("กำลังอัพโหลดรูปสินค้า...", "info");
+
+    // แปลง base64 (data URL) เป็น File object
+    const file = base64ToFile(base64, "product-image.png");
+
+    // === step 1: กดปุ่ม "+" ข้าง prompt ===
+    const plusBtn = findPlusButton();
+    if (!plusBtn) {
+      sendLog("ไม่พบปุ่ม '+' ข้าง prompt — ข้ามขั้นตอนอัพโหลด", "warning");
+      return false;
+    }
+    sendLog("กดปุ่ม '+' เปิดเมนูอัพโหลด...", "info");
+    plusBtn.click();
+    await sleep(500);
+
+    // === step 2: กดปุ่ม "อัพโหลดรูปภาพ" ใน popup ===
+    const uploadOption = findUploadOption();
+    if (!uploadOption) {
+      sendLog("ไม่พบตัวเลือก 'อัพโหลดรูปภาพ' ใน popup — ลอง fallback", "warning");
+      // fallback: หา input[type="file"] โดยตรง
+      const directInput = findFileInput();
+      if (directInput) {
+        injectFileToInput(directInput, file);
+        await sleep(2000);
+        return true;
+      }
+      return false;
+    }
+    sendLog("กดตัวเลือก 'อัพโหลดรูปภาพ'...", "info");
+    uploadOption.click();
+    await sleep(500);
+
+    // === step 3: หา input[type="file"] ที่ซ่อนอยู่แล้วใส่ไฟล์ ===
+    const fileInput = await pollForFileInput(5000);
+    if (!fileInput) {
+      sendLog("ไม่พบ input[type='file'] หลังกดอัพโหลด", "error");
+      return false;
+    }
+    injectFileToInput(fileInput, file);
+
+    // === step 4: รอรูปโหลดขึ้นหน้า ===
+    sendLog("รอรูปโหลด...", "info");
+    await sleep(2000);
+    sendLog("✓ อัพโหลดรูปสินค้าสำเร็จ", "success");
+    return true;
+  }
+
+  // ใส่ File เข้า input[type="file"] ผ่าน DataTransfer แล้ว dispatch change
+  function injectFileToInput(input, file) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // แปลง base64 data URL เป็น File object
+  function base64ToFile(dataUrl, filename) {
+    const [header, data] = dataUrl.split(",");
+    const mime = header.match(/:(.*?);/)[1];
+    const binary = atob(data);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      array[i] = binary.charCodeAt(i);
+    }
+    return new File([array], filename, { type: mime });
+  }
+
+  // หาปุ่ม "+" ข้าง prompt (มี aria-haspopup="dialog")
+  function findPlusButton() {
+    const editor = document.querySelector(
+      '[data-slate-editor="true"][contenteditable="true"]'
     );
 
-    await sleep(300);
-    sendLog(`กรอก prompt สำเร็จ (${text.length} ตัวอักษร)`, "info");
+    // strategy 1: หา button[aria-haspopup="dialog"] ใกล้ editor
+    if (editor) {
+      let container = editor.parentElement;
+      for (let depth = 0; depth < 6 && container; depth++) {
+        const buttons = container.querySelectorAll(
+          'button[type="button"][aria-haspopup="dialog"]'
+        );
+        for (const btn of buttons) {
+          if (isVisible(btn)) return btn;
+        }
+        container = container.parentElement;
+      }
+    }
+
+    // strategy 2: fallback — หาปุ่ม "+" ทั่วหน้า
+    const allButtons = document.querySelectorAll('button[aria-haspopup="dialog"]');
+    for (const btn of allButtons) {
+      if (isVisible(btn)) return btn;
+    }
+
+    // strategy 3: หาปุ่มที่มีแต่ "+" หรือ svg icon ใกล้ editor
+    if (editor) {
+      let container = editor.parentElement;
+      for (let depth = 0; depth < 4 && container; depth++) {
+        const buttons = container.querySelectorAll("button");
+        for (const btn of buttons) {
+          if (!isVisible(btn)) continue;
+          const text = (btn.textContent || "").trim();
+          if (text === "+" || text === "＋") return btn;
+        }
+        container = container.parentElement;
+      }
+    }
+
+    return null;
+  }
+
+  // หาตัวเลือก "อัพโหลดรูปภาพ" ใน popup/dialog ที่เปิดขึ้นมา
+  function findUploadOption() {
+    // scan ทุก div หาตัวที่ textContent ตรงกับ "อัพโหลดรูปภาพ"
+    const allDivs = document.querySelectorAll("div, span, li, a, button, [role='menuitem'], [role='option']");
+    for (const el of allDivs) {
+      const text = (el.textContent || "").trim();
+      // เปรียบเทียบตรง ๆ ก่อน
+      if (text === "อัพโหลดรูปภาพ") return el;
+    }
+    // fallback: หาตัวที่มี "อัพโหลด" อยู่ในข้อความ
+    for (const el of allDivs) {
+      const text = (el.textContent || "").trim().toLowerCase();
+      if (
+        (text.includes("อัพโหลด") || text.includes("upload")) &&
+        (text.includes("รูป") || text.includes("image") || text.includes("ภาพ") || text.includes("photo"))
+      ) {
+        // เลือก element ที่เล็กที่สุด (leaf-most) เพื่อไม่กดทั้ง container
+        if (el.children.length === 0 || el.querySelector("svg")) return el;
+      }
+    }
+    return null;
+  }
+
+  // หา input[type="file"] ที่มีอยู่ในหน้า
+  function findFileInput() {
+    const inputs = document.querySelectorAll('input[type="file"]');
+    for (const input of inputs) {
+      const accept = (input.getAttribute("accept") || "").toLowerCase();
+      if (!accept || accept.includes("image") || accept.includes("*")) {
+        return input;
+      }
+    }
+    return null;
+  }
+
+  // polling รอ input[type="file"] ปรากฏหลังคลิกปุ่ม upload
+  async function pollForFileInput(maxWait = 5000) {
+    const interval = 300;
+    let elapsed = 0;
+    while (elapsed < maxWait) {
+      const found = findFileInput();
+      if (found) return found;
+      await sleep(interval);
+      elapsed += interval;
+    }
+    return null;
   }
 
   // ==========================================================================
@@ -466,24 +627,30 @@
       try {
         sendLog(`รอบที่ ${index + 1} — ครั้งที่ ${attempt}/${MAX_RETRY}`, "accent");
 
-        // step 1: กรอก prompt
+        // step 1: อัพโหลดรูปสินค้า (ถ้ามี)
+        sendStatus(`รอบ ${index + 1}: กำลังอัพโหลดรูปสินค้า...`);
+        await uploadProductImage();
+
+        if (state.stopRequested) throw new Error("ผู้ใช้สั่งหยุด");
+
+        // step 2: กรอก prompt
         sendStatus(`รอบ ${index + 1}: กำลังกรอก prompt...`);
         await fillPrompt(prompt);
         await sleepWithStopCheck(500);
 
         if (state.stopRequested) throw new Error("ผู้ใช้สั่งหยุด");
 
-        // step 2: คลิก Generate
+        // step 3: คลิก Generate
         sendStatus(`รอบ ${index + 1}: กำลังคลิก Generate...`);
         await clickGenerate();
 
-        // step 3: รอผลลัพธ์
+        // step 4: รอผลลัพธ์
         sendStatus(`รอบ ${index + 1}: กำลังรอภาพผลลัพธ์...`);
         const resultImg = await waitForResult(120000);
 
         if (state.stopRequested) throw new Error("ผู้ใช้สั่งหยุด");
 
-        // step 4: ดาวน์โหลด
+        // step 5: ดาวน์โหลด
         sendStatus(`รอบ ${index + 1}: กำลังดาวน์โหลด...`);
         const timestamp = Date.now();
         const safeName = (productName || "product").replace(/[^a-zA-Z0-9ก-๙]/g, "_");
