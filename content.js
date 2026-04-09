@@ -124,8 +124,7 @@
 
   // ==========================================================================
   // fillPrompt — กรอก text ลงใน Slate editor
-  // ใช้ Clipboard API เขียนลง clipboard จริง แล้วจำลอง Ctrl+V + paste event
-  // fallback เป็น execCommand('insertText') ถ้ายังไม่ detect
+  // จำลอง keyboard typing ทีละตัวอักษร — วิธีเดียวที่ Slate detect ได้
   // ==========================================================================
   async function fillPrompt(text) {
     const editor = await findPromptBox();
@@ -135,60 +134,41 @@
 
     // step 1: focus ที่ editor
     editor.focus();
-    await sleep(500);
-
-    // step 2: Select all + delete เคลียร์เนื้อหาเดิม
-    const selectAll = new KeyboardEvent("keydown", {
-      key: "a", code: "KeyA", ctrlKey: true,
-      bubbles: true, cancelable: true
-    });
-    editor.dispatchEvent(selectAll);
-    await sleep(200);
-
-    const backspace = new KeyboardEvent("keydown", {
-      key: "Backspace", code: "Backspace",
-      bubbles: true, cancelable: true
-    });
-    editor.dispatchEvent(backspace);
     await sleep(300);
 
-    // step 3: เขียนลง clipboard จริงผ่าน Clipboard API
-    try {
-      await navigator.clipboard.writeText(text);
-      await sleep(200);
-    } catch (err) {
-      sendLog(`เขียน clipboard ล้มเหลว: ${err.message}`, "warning");
+    // step 2: ลบข้อความเดิม (ถ้ามี)
+    editor.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "a", code: "KeyA", ctrlKey: true, bubbles: true
+    }));
+    await sleep(100);
+    editor.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Backspace", code: "Backspace", bubbles: true
+    }));
+    await sleep(300);
+
+    // step 3: พิมพ์ทีละตัวอักษร — ส่งครบทุก event ที่ Slate ฟัง
+    for (const char of text) {
+      editor.dispatchEvent(new KeyboardEvent("keydown", {
+        key: char, bubbles: true
+      }));
+      editor.dispatchEvent(new KeyboardEvent("keypress", {
+        key: char, bubbles: true
+      }));
+      editor.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true, cancelable: true,
+        inputType: "insertText", data: char
+      }));
+      editor.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText", data: char
+      }));
+      editor.dispatchEvent(new KeyboardEvent("keyup", {
+        key: char, bubbles: true
+      }));
+      await sleep(10);
     }
 
-    // step 4: จำลอง Ctrl+V keydown
-    const pasteKeydown = new KeyboardEvent("keydown", {
-      key: "v", code: "KeyV", ctrlKey: true,
-      bubbles: true, cancelable: true
-    });
-    editor.dispatchEvent(pasteKeydown);
-    await sleep(200);
-
-    // step 5: ส่ง ClipboardEvent paste พร้อม data
-    const dt = new DataTransfer();
-    dt.setData("text/plain", text);
-    const pasteEvent = new ClipboardEvent("paste", {
-      bubbles: true,
-      cancelable: true,
-      clipboardData: dt
-    });
-    editor.dispatchEvent(pasteEvent);
-    await sleep(500);
-
-    // step 6: fallback — ถ้ายังไม่มีข้อความ ลอง execCommand
-    if (!editor.textContent || editor.textContent.trim().length < 10) {
-      sendLog("paste ไม่ทำงาน — ลอง execCommand fallback", "warning");
-      editor.focus();
-      document.execCommand("selectAll", false, null);
-      document.execCommand("delete", false, null);
-      document.execCommand("insertText", false, text);
-      await sleep(300);
-    }
-
+    await sleep(300);
     sendLog(`กรอก prompt สำเร็จ (${text.length} ตัวอักษร)`, "info");
   }
 
