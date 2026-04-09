@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "ZenityX Auto Gen",
+  "version": "1.0.0",
+  "description": "Automate การสร้างภาพสินค้าบน Google Flow (labs.google/fx) ด้วย AI prompt templates สำเร็จรูป",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://labs.google/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ZenityX Auto Gen"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://labs.google/fx/*"],
+      "js": ["prompt-templates.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

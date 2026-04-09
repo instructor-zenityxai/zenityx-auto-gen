@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZenityX Auto Gen</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <!-- ส่วนหัวของ popup -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <div class="logo-text">
+          <h1>ZenityX</h1>
+          <span class="subtitle">Auto Gen for Google Flow</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- ช่องอัพโหลดรูปสินค้า (เก็บเป็น base64) -->
+      <section class="section">
+        <label class="label">รูปสินค้า (Reference)</label>
+        <div class="upload-area" id="uploadArea">
+          <input type="file" id="productImage" accept="image/*" hidden />
+          <div class="upload-placeholder" id="uploadPlaceholder">
+            <span class="upload-icon">📷</span>
+            <p>คลิกเพื่ออัพโหลดรูปสินค้า</p>
+            <small>(เก็บใน local storage)</small>
+          </div>
+          <img id="previewImage" class="preview-image hidden" alt="preview" />
+          <button id="removeImage" class="remove-btn hidden" type="button">✕</button>
+        </div>
+      </section>
+
+      <!-- ช่องกรอกชื่อสินค้า / keyword -->
+      <section class="section">
+        <label class="label" for="productName">ชื่อสินค้า / Keyword</label>
+        <input
+          type="text"
+          id="productName"
+          class="input"
+          placeholder="เช่น ครีมหน้าใส, หูฟังบลูทูธ, กระเป๋าสะพาย"
+          autocomplete="off"
+        />
+      </section>
+
+      <!-- Dropdown เลือกสไตล์ภาพ -->
+      <section class="section">
+        <label class="label" for="styleSelect">สไตล์ภาพที่ต้องการ</label>
+        <select id="styleSelect" class="select">
+          <option value="ultimate_promo">โปรโมชั่นสุด (Ultimate Promo)</option>
+          <option value="ugc_review">UGC: อินฟลูฯ รีวิว (มีข้อความ)</option>
+          <option value="ugc_real">UGC: เรียล/ใช้งานจริง (คลีน)</option>
+          <option value="studio_premium">ภาพสตูดิโอ (Premium)</option>
+          <option value="live_stream">บรรยากาศไลฟ์สด (Live)</option>
+          <option value="model_with_product">นางแบบคู่สินค้า (Model)</option>
+          <option value="big_head">ล้อเลียนคนจริงหัวโต (Big Head)</option>
+        </select>
+      </section>
+
+      <!-- Custom prompt override (optional) -->
+      <section class="section">
+        <label class="label" for="customPrompt">
+          Custom Prompt
+          <span class="hint">(ไม่บังคับ — ถ้ากรอกจะใช้แทน preset)</span>
+        </label>
+        <textarea
+          id="customPrompt"
+          class="textarea"
+          rows="3"
+          placeholder="เขียน prompt เองถ้าต้องการควบคุมเต็มที่..."
+        ></textarea>
+      </section>
+
+      <!-- จำนวนภาพที่ต้องการ generate -->
+      <section class="section">
+        <label class="label" for="imageCount">
+          จำนวนภาพ <span id="countValue" class="count-badge">3</span>
+        </label>
+        <input
+          type="range"
+          id="imageCount"
+          class="range"
+          min="1"
+          max="10"
+          value="3"
+        />
+        <div class="range-marks">
+          <span>1</span>
+          <span>10</span>
+        </div>
+      </section>
+
+      <!-- ปุ่มควบคุม start/stop -->
+      <section class="section button-row">
+        <button id="startBtn" class="btn btn-primary">
+          <span class="btn-icon">▶</span>
+          เริ่มสร้างอัตโนมัติ
+        </button>
+        <button id="stopBtn" class="btn btn-danger" disabled>
+          <span class="btn-icon">■</span>
+          หยุด
+        </button>
+      </section>
+
+      <!-- แสดงสถานะและ progress -->
+      <section class="section">
+        <div class="status-bar">
+          <span class="status-label">สถานะ:</span>
+          <span id="statusText" class="status-text">พร้อมใช้งาน</span>
+        </div>
+        <div class="progress">
+          <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+        </div>
+      </section>
+
+      <!-- Log realtime -->
+      <section class="section">
+        <div class="log-header">
+          <label class="label">Log</label>
+          <button id="clearLog" class="btn-tiny">เคลียร์</button>
+        </div>
+        <div id="logContainer" class="log-container">
+          <div class="log-item log-info">
+            [พร้อมใช้งาน] เปิดหน้า labs.google/fx แล้วเริ่มได้เลย
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="prompt-templates.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
