@@ -12,6 +12,9 @@
   "host_permissions": [
     "https://labs.google/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "ZenityX Auto Gen"
